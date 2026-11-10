@@ -1,0 +1,45 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish-image:
+    name: Publish image to GHCR
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ github.event.release.tag_name }}
+      IMAGE: ghcr.io/${{ github.repository }}
+    steps:
+      - name: Check tag format
+        run: |
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release tag must look like 1.2.3 (no v prefix): $VERSION"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - run: go test -race ./...
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Build image
+        run: docker build --build-arg VERSION="$VERSION" -t "$IMAGE:$VERSION" -t "$IMAGE:latest" .
+
+      - name: Check embedded version
+        run: test "$(docker run --rm "$IMAGE:$VERSION" --version)" = "$VERSION"
+
+      - name: Push image
+        run: |
+          docker push "$IMAGE:$VERSION"
+          docker push "$IMAGE:latest"
